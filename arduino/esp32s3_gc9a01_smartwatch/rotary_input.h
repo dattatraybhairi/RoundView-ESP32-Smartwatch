@@ -73,21 +73,18 @@ static const uint8_t DRAM_ATTR kRotaryStateTable[7][4] = {
 
 static volatile uint8_t  g_rotaryState       = R_START;
 static volatile int32_t  g_encoderDelta      = 0;
-static volatile uint32_t g_lastBtnLowIsrMs   = 0;
 
 static bool     g_btnLastReading      = HIGH;
 static bool     g_btnStableState      = HIGH;
 static uint32_t g_btnLastDebounceMs   = 0;
 static uint32_t g_btnPressStartMs     = 0;
-static uint32_t g_btnReleaseMs        = 0;
 static bool     g_btnLongPressHandled = false;
 static uint8_t  g_pendingClickCount   = 0;
 static uint32_t g_firstClickReleaseMs = 0;
 
 void IRAM_ATTR onRotaryQuadratureIsr() {
-  // Prevent accidental rotation steps while the user is pressing the knob down
+  // Ignore accidental shaft rotation only while the push button is actively held LOW
   if (digitalRead(ENC_SW_PIN) == LOW) {
-    g_lastBtnLowIsrMs = millis();
     return;
   }
 
@@ -113,8 +110,8 @@ inline void initRotarySwitch() {
 
 /**
  * Polls the EC11 rotary encoder and push button.
- * @param instantSingleClick If true (e.g. on SCREEN_HOME), fires EVT_SINGLE_CLICK
- *                           immediately upon button release with zero double-click delay.
+ * @param instantSingleClick If true, fires EVT_SINGLE_CLICK immediately with zero
+ *                           double-click wait window.
  */
 inline RotaryEvent pollRotarySwitch(bool instantSingleClick = false) {
   uint32_t nowMs = millis();
@@ -131,19 +128,10 @@ inline RotaryEvent pollRotarySwitch(bool instantSingleClick = false) {
       g_btnStableState = rawBtn;
 
       if (g_btnStableState == LOW) {
-        // Button just pressed down: clear any accidental shaft nudge delta
-        noInterrupts();
-        g_encoderDelta = 0;
-        interrupts();
         g_btnPressStartMs = nowMs;
         g_btnLongPressHandled = false;
       } else {
-        // Button just released (LOW -> HIGH)
-        g_btnReleaseMs = nowMs;
-        noInterrupts();
-        g_encoderDelta = 0;
-        interrupts();
-
+        // Button released (LOW -> HIGH)
         if (!g_btnLongPressHandled) {
           if (instantSingleClick) {
             g_pendingClickCount = 0;
@@ -175,8 +163,8 @@ inline RotaryEvent pollRotarySwitch(bool instantSingleClick = false) {
     return EVT_SINGLE_CLICK;
   }
 
-  // 4. Drain accumulated quadrature steps (only when button is not pressed)
-  if (g_btnStableState == HIGH && (nowMs - g_btnReleaseMs) > 35) {
+  // 4. Drain accumulated quadrature steps immediately whenever button is not held LOW
+  if (g_btnStableState == HIGH) {
     noInterrupts();
     int32_t delta = g_encoderDelta;
     if (delta > 0) g_encoderDelta--;

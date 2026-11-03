@@ -125,11 +125,13 @@ test('WiFi, Bluetooth, and Games screens respond to rotary navigation, single cl
   assert.equal(state.gameMode, 'SELECT');
   assert.equal(state.selectedGame, 'ORBITAL_BREAKER');
 
-  // Rotate CW switches selected game to RADAR_DEFENSE, then CYBER_TUNNEL
+  // Rotate CW switches selected game to RADAR_DEFENSE, CYBER_TUNNEL, then FLAPPY_BIRD
   state = reduceWatchState(state, 'CW');
   assert.equal(state.selectedGame, 'RADAR_DEFENSE');
   state = reduceWatchState(state, 'CW');
   assert.equal(state.selectedGame, 'CYBER_TUNNEL');
+  state = reduceWatchState(state, 'CW');
+  assert.equal(state.selectedGame, 'FLAPPY_BIRD');
 
   // Single click starts playing
   state = reduceWatchState(state, 'SINGLE_CLICK');

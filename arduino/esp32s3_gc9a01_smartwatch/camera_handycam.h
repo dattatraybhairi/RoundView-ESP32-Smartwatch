@@ -58,24 +58,32 @@ inline bool initOV2640Camera() {
   config.pin_sccb_scl = CAM_PIN_SIOC;
   config.pin_pwdn     = CAM_PIN_PWDN;
   config.pin_reset    = CAM_PIN_RESET;
-  config.xclk_freq_hz = 16000000; // 16MHz XCLK runs M2145 cooler than 20MHz
+  // IMPORTANT: ESP32-S3 LCD_CAM requires 20MHz XCLK (240MHz PLL / 12 = 20MHz)
+  // for M2145 (GC2145) / OV2640 SCCB sensor detection & PLL lock!
+  config.xclk_freq_hz = 20000000;
 
   config.frame_size   = FRAMESIZE_240X240;
   config.pixel_format = PIXFORMAT_RGB565;
-  // CAMERA_GRAB_WHEN_EMPTY + fb_count=1 stops LCD_CAM DMA automatically when
-  // you are on Watch Face / Menu / Games, eliminating background PSRAM DMA heat!
-  config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
+  config.grab_mode    = CAMERA_GRAB_LATEST;
   config.fb_location  = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 12;
-  config.fb_count     = 1;
+  config.fb_count     = 2;
 
   esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    // Fallback to single framebuffer if PSRAM heap is tight
+    config.fb_count  = 1;
+    config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+    err = esp_camera_init(&config);
+  }
+
   if (err != ESP_OK) {
     Serial.printf("[CAM] Camera init failed: 0x%x\n", err);
     g_camState.initialized = false;
     return false;
   }
 
+  Serial.println("[CAM] M2145 / OV2640 Camera Initialized OK (240x240 RGB565)");
   g_camState.initialized = true;
   return true;
 }

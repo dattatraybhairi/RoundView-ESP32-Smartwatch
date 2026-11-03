@@ -584,14 +584,15 @@ inline void renderBleScreen(Arduino_Canvas *cv, bool bleEnabled) {
 
 /**
  * ============================================================================
- * 3-GAME SMOOTH ROTARY ARCADE SUITE (60+ FPS Delta-Time + Smooth Interpolation)
+ * 4-GAME SMOOTH ROTARY ARCADE SUITE (60+ FPS Delta-Time + Smooth Interpolation)
  * ============================================================================
  * Game 0: ORBIT BREAKER  (360° Smooth Perimeter Paddle + 2-Ring Core Bricks)
  * Game 1: RADAR DEFENSE  (360° Smooth Turret + Twin Laser Burst + EMP Wave)
  * Game 2: CYBER TUNNEL   (360° Polar Vortex Glider + Expanding Portal Rings)
+ * Game 3: FLAPPY BIRD    (60FPS Pipe Flyer — 1x Click or Rotate Knob to Flap!)
  */
 static uint8_t  g_gameMode          = 0;     // 0=Lobby, 1=Playing, 2=GameOver
-static uint8_t  g_selectedGame      = 0;     // 0, 1, 2
+static uint8_t  g_selectedGame      = 0;     // 0, 1, 2, 3
 static float    g_smoothPlayerDeg   = 90.0f; // Smoothly interpolated rotary angle
 static uint16_t g_gameScore         = 0;
 static uint16_t g_gameBest          = 140;
@@ -619,6 +620,14 @@ static float    g_gateRadius[3]     = {16.0f, 48.0f, 80.0f};
 static float    g_gateGapDeg[3]     = {60.0f, 185.0f, 305.0f};
 static bool     g_gateScored[3]     = {false, false, false};
 
+// Game 3 (Flappy Bird) state — Smooth Rotary Target Y + Flap Physics
+static float    g_birdY             = 114.0f;
+static float    g_birdTargetY       = 114.0f;
+static float    g_birdVy            = -45.0f;
+static float    g_pipeX[2]          = {178.0f, 286.0f};
+static float    g_pipeGapY[2]       = {104.0f, 132.0f};
+static bool     g_pipeScored[2]     = {false, false};
+
 inline void fireRadarBolt(float aimDeg) {
   for (int i = 0; i < 6; i++) {
     if (g_boltDist[i] < 0.0f) {
@@ -630,7 +639,7 @@ inline void fireRadarBolt(float aimDeg) {
 }
 
 inline void startArcadeGame(uint8_t gameIdx, int16_t currentPaddleDeg) {
-  g_selectedGame    = gameIdx % 3;
+  g_selectedGame    = gameIdx % 4;
   g_gameMode        = 1;
   g_gameScore       = 0;
   g_gameLives       = 3;
@@ -659,18 +668,55 @@ inline void startArcadeGame(uint8_t gameIdx, int16_t currentPaddleDeg) {
     g_gateGapDeg[i] = (float)((i * 120 + 60) % 360);
     g_gateScored[i] = false;
   }
+
+  // Initialize Game 3 (Flappy Bird)
+  g_birdY         = 114.0f;
+  g_birdTargetY   = 114.0f;
+  g_birdVy        = -45.0f;
+  g_pipeX[0]      = 178.0f;
+  g_pipeX[1]      = 286.0f;
+  g_pipeGapY[0]   = 102.0f;
+  g_pipeGapY[1]   = 134.0f;
+  g_pipeScored[0] = false;
+  g_pipeScored[1] = false;
 }
 
 inline bool handleGamesRotaryEvent(RotaryEvent evt, int16_t &paddleDeg) {
   if (g_gameMode == 0) {
-    if (evt == EVT_CW) g_selectedGame = (g_selectedGame + 1) % 3;
-    else if (evt == EVT_CCW) g_selectedGame = (g_selectedGame + 2) % 3;
+    if (evt == EVT_CW) g_selectedGame = (g_selectedGame + 1) % 4;
+    else if (evt == EVT_CCW) g_selectedGame = (g_selectedGame + 3) % 4;
     else if (evt == EVT_SINGLE_CLICK) startArcadeGame(g_selectedGame, paddleDeg);
     else if (evt == EVT_DOUBLE_CLICK) return true;
     return false;
   }
 
   if (g_gameMode == 1) {
+    if (g_selectedGame == 3) {
+      // Flappy Bird: Direct Rotary Switch control + 1x Click Flap!
+      // Rotate CW = Flap/Climb UP, Rotate CCW = Swoop/Dive DOWN, 1x Click = Flap UP
+      if (evt == EVT_CW) {
+        paddleDeg = (paddleDeg + 16) % 360;
+        g_birdTargetY -= 20.0f;
+        if (g_birdTargetY < 36.0f) g_birdTargetY = 36.0f;
+        g_birdVy = -95.0f;
+        g_boostUntilMs = millis() + 220;
+      } else if (evt == EVT_CCW) {
+        paddleDeg = (paddleDeg + 344) % 360;
+        g_birdTargetY += 20.0f;
+        if (g_birdTargetY > 186.0f) g_birdTargetY = 186.0f;
+        g_birdVy = 40.0f;
+        g_boostUntilMs = millis() + 220;
+      } else if (evt == EVT_SINGLE_CLICK) {
+        g_birdTargetY -= 26.0f;
+        if (g_birdTargetY < 36.0f) g_birdTargetY = 36.0f;
+        g_birdVy = -120.0f;
+        g_boostUntilMs = millis() + 220;
+      } else if (evt == EVT_DOUBLE_CLICK) {
+        g_gameMode = 0;
+      }
+      return false;
+    }
+
     if (evt == EVT_CW) {
       paddleDeg = (paddleDeg + 16) % 360;
       if (g_selectedGame == 1) fireRadarBolt((float)paddleDeg);
@@ -700,54 +746,56 @@ inline bool handleGamesRotaryEvent(RotaryEvent evt, int16_t &paddleDeg) {
 inline void renderGamesScreen(Arduino_Canvas *cv, int16_t paddleDeg) {
   cv->fillScreen(COLOR_BG_OBSIDIAN);
 
-  static const char *kTitles[3] = {
+  static const char *kTitles[4] = {
     "01. ORBIT BREAKER",
     "02. RADAR DEFENSE",
-    "03. CYBER TUNNEL"
+    "03. CYBER TUNNEL",
+    "04. FLAPPY BIRD"
   };
-  static const char *kSubs[3] = {
+  static const char *kSubs[4] = {
     "360 Paddle Brick Pong",
     "Rotary Turret Shooter",
-    "Vortex Gate Dodger"
+    "Vortex Gate Dodger",
+    "1xClick / Rotate Flap"
   };
-  static const uint16_t kGameColors[3] = {
-    COLOR_CYAN_ACCENT, COLOR_AMBER, COLOR_VIOLET
+  static const uint16_t kGameColors[4] = {
+    COLOR_CYAN_ACCENT, COLOR_AMBER, COLOR_VIOLET, COLOR_EMERALD
   };
 
-  // 1. RICH COLOR-CHANGING GAME SELECT LOBBY
+  // 1. RICH COLOR-CHANGING 4-GAME SELECT LOBBY
   if (g_gameMode == 0) {
-    uint16_t lobbyAccent = kGameColors[g_selectedGame % 3];
+    uint16_t lobbyAccent = kGameColors[g_selectedGame % 4];
     drawCircularBezelTicks(cv, lobbyAccent);
-    drawMenuLogo(cv, 4, TFT_CENTER_X, 28, lobbyAccent, COLOR_BG_OBSIDIAN);
+    drawMenuLogo(cv, 4, TFT_CENTER_X, 24, lobbyAccent, COLOR_BG_OBSIDIAN);
 
     cv->setTextSize(1);
     cv->setTextColor(lobbyAccent);
-    cv->setCursor(62, 42);
+    cv->setCursor(62, 36);
     cv->printf("ARCADE BEST: %04u", g_gameBest);
 
-    for (uint8_t i = 0; i < 3; i++) {
-      int16_t by = 58 + i * 40;
+    for (uint8_t i = 0; i < 4; i++) {
+      int16_t by = 48 + i * 35;
       bool sel = (g_selectedGame == i);
       uint16_t cardBorder = sel ? kGameColors[i] : COLOR_TEXT_MUTED;
       uint16_t cardBg     = sel ? 0x1926 : COLOR_PANEL_SLATE;
 
-      cv->fillRoundRect(38, by, 164, 34, 6, cardBg);
-      cv->drawRoundRect(38, by, 164, 34, 6, cardBorder);
+      cv->fillRoundRect(40, by, 160, 30, 6, cardBg);
+      cv->drawRoundRect(40, by, 160, 30, 6, cardBorder);
       if (sel) {
-        cv->drawRoundRect(37, by - 1, 166, 36, 7, COLOR_TEXT_WHITE);
+        cv->drawRoundRect(39, by - 1, 162, 32, 7, COLOR_TEXT_WHITE);
       }
 
       cv->setTextColor(sel ? kGameColors[i] : COLOR_TEXT_WHITE);
-      cv->setCursor(46, by + 6);
+      cv->setCursor(48, by + 5);
       cv->print(kTitles[i]);
 
       cv->setTextColor(sel ? COLOR_TEXT_WHITE : COLOR_TEXT_MUTED);
-      cv->setCursor(46, by + 19);
+      cv->setCursor(48, by + 17);
       cv->print(kSubs[i]);
     }
 
     cv->setTextColor(COLOR_TEXT_WHITE);
-    cv->setCursor(48, 198);
+    cv->setCursor(48, 194);
     cv->print("1x:PLAY  ROT:GAME  2x:BACK");
     return;
   }
@@ -945,7 +993,7 @@ inline void renderGamesScreen(Arduino_Canvas *cv, int16_t paddleDeg) {
         else g_gameMode = 2;
       }
     }
-  } else {
+  } else if (g_selectedGame == 2) {
     // ========================================================================
     // GAME 2: CYBER TUNNEL (Smooth 360° Polar Vortex Gate Runner)
     // ========================================================================
@@ -987,6 +1035,108 @@ inline void renderGamesScreen(Arduino_Canvas *cv, int16_t paddleDeg) {
     polarToScreen(94.0f, g_smoothPlayerDeg, sx, sy);
     cv->fillCircle(sx, sy, boostActive ? 8 : 6, boostActive ? COLOR_EMERALD : COLOR_CYAN_ACCENT);
     cv->drawCircle(sx, sy, boostActive ? 9 : 7, COLOR_TEXT_WHITE);
+  } else {
+    // ========================================================================
+    // GAME 3: FLAPPY BIRD (Smooth 60FPS Pipe Flyer — Click or Rotate to Flap!)
+    // ========================================================================
+    drawCircularBezelTicks(cv, COLOR_EMERALD);
+
+    // Scrolling ground strip at y=198
+    cv->drawLine(46, 198, 194, 198, COLOR_EMERALD);
+    int16_t groundScroll = (int16_t)((nowMs / 18) % 14);
+    for (int16_t gx = 50 - groundScroll; gx < 190; gx += 14) {
+      cv->drawLine(gx, 199, gx - 5, 204, COLOR_TEXT_MUTED);
+    }
+
+    // Bird smooth rotary interpolation + gentle gravity
+    g_birdVy += 170.0f * dt;
+    if (g_birdVy > 125.0f) g_birdVy = 125.0f;
+    g_birdTargetY += g_birdVy * dt;
+
+    if (g_birdTargetY < 34.0f) {
+      g_birdTargetY = 34.0f;
+      g_birdVy      = 0.0f;
+    } else if (g_birdTargetY > 190.0f) {
+      if (g_gameLives > 1) {
+        g_gameLives--;
+        g_birdTargetY = 106.0f;
+        g_birdY       = 106.0f;
+        g_birdVy      = -75.0f;
+      } else {
+        g_gameMode = 2;
+      }
+    }
+
+    // Exponentially smooth g_birdY toward g_birdTargetY (same 0.45f glide as rotary paddle)
+    g_birdY += (g_birdTargetY - g_birdY) * 0.45f;
+
+    float pipeSpeed = 68.0f + (g_gameScore * 0.12f);
+    if (pipeSpeed > 115.0f) pipeSpeed = 115.0f;
+    const int16_t kGapHalf = 30;
+
+    for (int p = 0; p < 2; p++) {
+      g_pipeX[p] -= pipeSpeed * dt;
+
+      if (g_pipeX[p] < 18.0f) {
+        g_pipeX[p]      += 216.0f;
+        g_pipeGapY[p]    = 78.0f + (float)((nowMs + p * 47 + g_gameScore * 13) % 68);
+        g_pipeScored[p]  = false;
+      }
+
+      if (!g_pipeScored[p] && (g_pipeX[p] + 10.0f) < 68.0f) {
+        g_pipeScored[p] = true;
+        g_gameScore += 10;
+        if (g_gameScore > g_gameBest) g_gameBest = g_gameScore;
+      }
+
+      int16_t px     = (int16_t)g_pipeX[p];
+      int16_t gapTop = (int16_t)g_pipeGapY[p] - kGapHalf;
+      int16_t gapBot = (int16_t)g_pipeGapY[p] + kGapHalf;
+
+      // Render top & bottom Flappy Bird pipes inside the round viewport
+      if (px >= 22 && px <= 198) {
+        int16_t topH = gapTop - 32;
+        if (topH > 0) {
+          cv->fillRect(px, 32, 20, topH, COLOR_EMERALD);
+          cv->drawRect(px, 32, 20, topH, COLOR_TEXT_WHITE);
+          cv->fillRect(px - 2, gapTop - 6, 24, 6, COLOR_EMERALD);
+          cv->drawRect(px - 2, gapTop - 6, 24, 6, COLOR_TEXT_WHITE);
+        }
+
+        int16_t botH = 197 - gapBot;
+        if (botH > 0) {
+          cv->fillRect(px, gapBot, 20, botH, COLOR_EMERALD);
+          cv->drawRect(px, gapBot, 20, botH, COLOR_TEXT_WHITE);
+          cv->fillRect(px - 2, gapBot, 24, 6, COLOR_EMERALD);
+          cv->drawRect(px - 2, gapBot, 24, 6, COLOR_TEXT_WHITE);
+        }
+      }
+
+      // Pipe collision check against bird at x=68, radius=7
+      if (g_pipeX[p] <= 75.0f && (g_pipeX[p] + 20.0f) >= 61.0f) {
+        if ((g_birdY - 7.0f) < (float)gapTop || (g_birdY + 7.0f) > (float)gapBot) {
+          if (g_gameLives > 1) {
+            g_gameLives--;
+            g_birdTargetY = g_pipeGapY[p];
+            g_birdY       = g_pipeGapY[p];
+            g_birdVy      = -60.0f;
+            g_pipeX[p]   -= 28.0f;
+          } else {
+            g_gameMode = 2;
+          }
+        }
+      }
+    }
+
+    // Draw Flappy Bird character at (68, g_birdY)
+    int16_t by = (int16_t)g_birdY;
+    int16_t wingOffset = (g_birdVy < -15.0f) ? -4 : 1;
+    cv->fillCircle(68, by, 8, COLOR_AMBER);
+    cv->drawCircle(68, by, 8, COLOR_TEXT_WHITE);
+    cv->fillRoundRect(60, by + wingOffset, 8, 5, 2, boostActive ? COLOR_CYAN_ACCENT : COLOR_TEXT_WHITE);
+    cv->fillCircle(71, by - 2, 2, COLOR_TEXT_WHITE);
+    cv->drawPixel(72, by - 2, COLOR_BG_OBSIDIAN);
+    cv->fillTriangle(76, by - 2, 82, by + 1, 76, by + 4, COLOR_ROSE);
   }
 
   // Top Arcade HUD Pill

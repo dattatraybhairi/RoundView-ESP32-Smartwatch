@@ -179,6 +179,15 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
       { radius: 48, gapDeg: 185, scored: false },
       { radius: 80, gapDeg: 300, scored: false },
     ];
+
+    // Flappy Bird state
+    let birdY = 114;
+    let birdVy = -75;
+    const flappyPipes: { x: number; gapY: number; scored: boolean }[] = [
+      { x: 178, gapY: 102, scored: false },
+      { x: 286, gapY: 134, scored: false },
+    ];
+
     let phaseBoostSec = 0;
     let smoothDeg = stateRef.current.paddleAngleDeg;
     let lastTargetDeg = stateRef.current.paddleAngleDeg;
@@ -202,7 +211,7 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
       smoothDeg = (smoothDeg + angDelta * Math.min(1, dt * 22) + 360) % 360;
       const paddleDeg = smoothDeg;
 
-      // Auto-fire assist in RADAR_DEFENSE when rotating the knob
+      // Auto-fire assist in RADAR_DEFENSE or Flap in FLAPPY_BIRD when rotating the knob
       if (targetDeg !== lastTargetDeg) {
         lastTargetDeg = targetDeg;
         if (st.selectedGame === 'RADAR_DEFENSE') {
@@ -213,6 +222,9 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
             vx: Math.cos(rad) * 170,
             vy: Math.sin(rad) * 170,
           });
+        } else if (st.selectedGame === 'FLAPPY_BIRD') {
+          birdVy = -142;
+          phaseBoostSec = 0.18;
         }
       }
 
@@ -232,6 +244,9 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
           phaseBoostSec = 0.45;
         } else if (st.selectedGame === 'CYBER_TUNNEL') {
           phaseBoostSec = 0.65;
+        } else if (st.selectedGame === 'FLAPPY_BIRD') {
+          birdVy = -142;
+          phaseBoostSec = 0.18;
         } else {
           // Speed boost impulse in Orbital Breaker
           ballVx *= 1.14;
@@ -391,7 +406,7 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
             }
           }
         }
-      } else {
+      } else if (st.selectedGame === 'CYBER_TUNNEL') {
         // CYBER_TUNNEL: 360° Polar Vortex Gate Dodger
         ctx.fillStyle = '#8b5cf6';
         ctx.beginPath();
@@ -432,6 +447,93 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
         ctx.fillStyle = phaseBoostSec > 0 ? '#10b981' : '#22d3ee';
         ctx.beginPath();
         ctx.arc(shipPt.x, shipPt.y, phaseBoostSec > 0 ? 7.5 : 6, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // FLAPPY_BIRD: Smooth 60FPS Pipe Flyer
+        birdVy = Math.min(195, birdVy + 290 * dt);
+        birdY += birdVy * dt;
+        if (birdY < 34) {
+          birdY = 34;
+          birdVy = 0;
+        } else if (birdY > 190) {
+          birdY = 106;
+          birdVy = -95;
+        }
+
+        const pipeSpeed = Math.min(115, 68 + score * 0.12);
+        const gapHalf = 30;
+
+        for (const p of flappyPipes) {
+          p.x -= pipeSpeed * dt;
+          if (p.x < 18) {
+            p.x += 216;
+            p.gapY = 78 + ((Math.floor(now) + score * 13) % 68);
+            p.scored = false;
+          }
+          if (!p.scored && p.x + 10 < 68) {
+            p.scored = true;
+            score += 10;
+            onUpdateScore?.(score);
+          }
+
+          const gapTop = p.gapY - gapHalf;
+          const gapBot = p.gapY + gapHalf;
+
+          // Draw top & bottom pipes
+          ctx.fillStyle = '#10b981';
+          ctx.strokeStyle = '#f8fafc';
+          ctx.lineWidth = 1.2;
+          if (gapTop > 32) {
+            ctx.fillRect(p.x, 32, 20, gapTop - 32);
+            ctx.strokeRect(p.x, 32, 20, gapTop - 32);
+            ctx.fillRect(p.x - 2, gapTop - 6, 24, 6);
+          }
+          if (197 > gapBot) {
+            ctx.fillRect(p.x, gapBot, 20, 197 - gapBot);
+            ctx.strokeRect(p.x, gapBot, 20, 197 - gapBot);
+            ctx.fillRect(p.x - 2, gapBot, 24, 6);
+          }
+
+          // Collision bounce-reset in simulator
+          if (p.x <= 75 && p.x + 20 >= 61) {
+            if (birdY - 7 < gapTop || birdY + 7 > gapBot) {
+              birdY = p.gapY;
+              birdVy = -70;
+              p.x -= 28;
+            }
+          }
+        }
+
+        // Ground line
+        ctx.strokeStyle = '#10b981';
+        ctx.beginPath();
+        ctx.moveTo(46, 198);
+        ctx.lineTo(194, 198);
+        ctx.stroke();
+
+        // Draw Flappy Bird sprite at (68, birdY)
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.arc(68, birdY, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+
+        // Wing
+        ctx.fillStyle = phaseBoostSec > 0 ? '#22d3ee' : '#ffffff';
+        ctx.fillRect(60, birdY + (birdVy < -15 ? -4 : 1), 8, 5);
+
+        // Eye & Beak
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(71, birdY - 2, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#f43f5e';
+        ctx.beginPath();
+        ctx.moveTo(76, birdY - 2);
+        ctx.lineTo(82, birdY + 1);
+        ctx.lineTo(76, birdY + 4);
+        ctx.closePath();
         ctx.fill();
       }
 
@@ -1281,19 +1383,19 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
                       </div>
                     </div>
 
-                    <div className="w-full max-w-[172px] flex flex-col gap-1.5 my-auto">
+                    <div className="w-full max-w-[172px] flex flex-col gap-1 my-auto">
                       <button
                         type="button"
                         onClick={() => onRotaryEvent('SINGLE_CLICK')}
-                        className={`px-2 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                        className={`px-2 py-1 rounded-lg border text-left transition-all cursor-pointer ${
                           state.selectedGame === 'ORBITAL_BREAKER'
                             ? 'bg-amber-500/20 border-amber-400 text-white shadow-md'
                             : 'bg-slate-900/70 border-slate-800 text-slate-400'
                         }`}
                       >
-                        <div className="text-[9px] font-mono font-bold flex items-center justify-between">
+                        <div className="text-[8px] font-mono font-bold flex items-center justify-between">
                           <span>01. Orbit Breaker</span>
-                          <Disc className="w-3 h-3 text-cyan-400" />
+                          <Disc className="w-2.5 h-2.5 text-cyan-400" />
                         </div>
                         <div className="text-[7px] text-slate-300">
                           360° Rotary Paddle Brick Pong
@@ -1303,15 +1405,15 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
                       <button
                         type="button"
                         onClick={() => onRotaryEvent('SINGLE_CLICK')}
-                        className={`px-2 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                        className={`px-2 py-1 rounded-lg border text-left transition-all cursor-pointer ${
                           state.selectedGame === 'RADAR_DEFENSE'
                             ? 'bg-amber-500/20 border-amber-400 text-white shadow-md'
                             : 'bg-slate-900/70 border-slate-800 text-slate-400'
                         }`}
                       >
-                        <div className="text-[9px] font-mono font-bold flex items-center justify-between">
+                        <div className="text-[8px] font-mono font-bold flex items-center justify-between">
                           <span>02. Radar Defense</span>
-                          <Radio className="w-3 h-3 text-amber-400" />
+                          <Radio className="w-2.5 h-2.5 text-amber-400" />
                         </div>
                         <div className="text-[7px] text-slate-300">
                           360° Rotary Turret Space Shooter
@@ -1321,18 +1423,36 @@ export const GC9A01RoundDisplay: React.FC<GC9A01RoundDisplayProps> = ({
                       <button
                         type="button"
                         onClick={() => onRotaryEvent('SINGLE_CLICK')}
-                        className={`px-2 py-1.5 rounded-lg border text-left transition-all cursor-pointer ${
+                        className={`px-2 py-1 rounded-lg border text-left transition-all cursor-pointer ${
                           state.selectedGame === 'CYBER_TUNNEL'
                             ? 'bg-amber-500/20 border-amber-400 text-white shadow-md'
                             : 'bg-slate-900/70 border-slate-800 text-slate-400'
                         }`}
                       >
-                        <div className="text-[9px] font-mono font-bold flex items-center justify-between">
+                        <div className="text-[8px] font-mono font-bold flex items-center justify-between">
                           <span>03. Cyber Tunnel</span>
-                          <Sparkles className="w-3 h-3 text-violet-400" />
+                          <Sparkles className="w-2.5 h-2.5 text-violet-400" />
                         </div>
                         <div className="text-[7px] text-slate-300">
                           360° Polar Vortex Gate Runner
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onRotaryEvent('SINGLE_CLICK')}
+                        className={`px-2 py-1 rounded-lg border text-left transition-all cursor-pointer ${
+                          state.selectedGame === 'FLAPPY_BIRD'
+                            ? 'bg-emerald-500/20 border-emerald-400 text-white shadow-md'
+                            : 'bg-slate-900/70 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        <div className="text-[8px] font-mono font-bold flex items-center justify-between">
+                          <span>04. Flappy Bird</span>
+                          <Gamepad2 className="w-2.5 h-2.5 text-emerald-400" />
+                        </div>
+                        <div className="text-[7px] text-slate-300">
+                          1×Click / Rotate Pipe Flyer
                         </div>
                       </button>
                     </div>

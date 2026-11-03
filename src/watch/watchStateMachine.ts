@@ -58,12 +58,17 @@ export interface BleDevice {
   type: 'PHONE' | 'SHUTTER' | 'AUDIO' | 'SENSOR';
 }
 
-export type GameId = 'ORBITAL_BREAKER' | 'RADAR_DEFENSE' | 'CYBER_TUNNEL';
+export type GameId =
+  | 'ORBITAL_BREAKER'
+  | 'RADAR_DEFENSE'
+  | 'CYBER_TUNNEL'
+  | 'FLAPPY_BIRD';
 
 export const ARCADE_GAMES: GameId[] = [
   'ORBITAL_BREAKER',
   'RADAR_DEFENSE',
   'CYBER_TUNNEL',
+  'FLAPPY_BIRD',
 ];
 
 export interface HardwareLogEntry {

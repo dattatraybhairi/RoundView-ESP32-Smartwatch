@@ -105,7 +105,9 @@ void dispatchRotaryEvent(RotaryEvent evt) {
           SCREEN_BLUETOOTH, SCREEN_GAMES, SCREEN_HOME
         };
         g_screen = kTargets[g_menuIndex];
-        if (g_screen == SCREEN_GALLERY && g_gallery.fileCount == 0) {
+        if (g_screen == SCREEN_CAMERA && !g_camState.initialized) {
+          initOV2640Camera();
+        } else if (g_screen == SCREEN_GALLERY && g_gallery.fileCount == 0) {
           if (!g_gallery.mounted) initSDCardGallery();
           else scanSDGalleryFolder();
         }
@@ -118,11 +120,19 @@ void dispatchRotaryEvent(RotaryEvent evt) {
       if (evt == EVT_CW) g_camState.activeTool = (g_camState.activeTool + 1) % CAM_TOOL_COUNT;
       else if (evt == EVT_CCW) g_camState.activeTool = (g_camState.activeTool + CAM_TOOL_COUNT - 1) % CAM_TOOL_COUNT;
       else if (evt == EVT_SINGLE_CLICK) {
-        if (g_camState.activeTool == CAM_TOOL_SNAP) captureHandyCamFrameToSD();
-        else if (g_camState.activeTool == CAM_TOOL_STREAM) g_camState.streaming = !g_camState.streaming;
-        else if (g_camState.activeTool == CAM_TOOL_ZOOM) cycleCameraZoom();
-        else if (g_camState.activeTool == CAM_TOOL_FILTER) cycleCameraFilter();
-        else if (g_camState.activeTool == CAM_TOOL_EXPOSURE) cycleCameraExposure();
+        if (!g_camState.initialized) {
+          initOV2640Camera();
+        } else if (g_camState.activeTool == CAM_TOOL_SNAP) {
+          captureHandyCamFrameToSD();
+        } else if (g_camState.activeTool == CAM_TOOL_STREAM) {
+          g_camState.streaming = !g_camState.streaming;
+        } else if (g_camState.activeTool == CAM_TOOL_ZOOM) {
+          cycleCameraZoom();
+        } else if (g_camState.activeTool == CAM_TOOL_FILTER) {
+          cycleCameraFilter();
+        } else if (g_camState.activeTool == CAM_TOOL_EXPOSURE) {
+          cycleCameraExposure();
+        }
       } else if (evt == EVT_DOUBLE_CLICK) {
         g_screen = SCREEN_MENU;
       }
@@ -168,19 +178,18 @@ void dispatchRotaryEvent(RotaryEvent evt) {
 }
 
 void setup() {
-  // 1. Run CPU at 160 MHz instead of 240 MHz (cuts CPU thermal dissipation by ~35%
-  //    while keeping APB clock at 80 MHz so SPI2 and Camera timing are unchanged)
-  setCpuFrequencyMhz(160);
-
+  // IMPORTANT: Keep ESP32-S3 at 240 MHz (do NOT call setCpuFrequencyMhz(160))!
+  // The ESP32-S3 LCD_CAM peripheral requires PLL_F240M_CLK (240MHz) to generate
+  // the 20MHz XCLK on GPIO 15 for M2145 / OV2640 sensor initialization.
   Serial.begin(115200);
-  Serial.println("Booting ChronoS3 (Cool Eco Mode: 160MHz, WiFi OFF, BLE OFF)...");
+  Serial.println("Booting ChronoS3 (WiFi OFF, BLE OFF, 20MHz CAM XCLK)...");
 
 #if (TFT_BL_PIN >= 0)
   pinMode(TFT_BL_PIN, OUTPUT);
   digitalWrite(TFT_BL_PIN, HIGH);
 #endif
 
-  // 2. Shut down WiFi & Bluetooth radios at boot so RF PA generates zero heat
+  // Shut down WiFi & Bluetooth radios at boot so RF PA generates zero heat
   WiFi.persistent(false);
   WiFi.mode(WIFI_OFF);
   btStop();
@@ -196,26 +205,36 @@ void setup() {
 }
 
 void loop() {
-  // On SCREEN_HOME, SCREEN_MENU, SCREEN_WIFI, and SCREEN_BLUETOOTH, Long-Press goes
-  // straight to HOME so Single-Click can fire with 0ms release latency!
+  // On SCREEN_HOME, SCREEN_MENU, SCREEN_WIFI, SCREEN_BLUETOOTH, and during active
+  // Flappy Bird gameplay, Long-Press goes straight to HOME so Single-Click fires
+  // with 0ms release latency (and rapid Flappy Bird taps never misfire as 2xClick)!
   bool instantSingleClick = (
     g_screen == SCREEN_HOME ||
     g_screen == SCREEN_MENU ||
     g_screen == SCREEN_WIFI ||
-    g_screen == SCREEN_BLUETOOTH
+    g_screen == SCREEN_BLUETOOTH ||
+    (g_screen == SCREEN_GAMES && g_gameMode == 1 && g_selectedGame == 3)
   );
 
-  RotaryEvent evt = pollRotarySwitch(instantSingleClick);
-  if (evt != EVT_NONE) {
+  // Drain ALL accumulated rotary detents & clicks before rendering the next frame
+  // so fast knob spins in games & menus respond with zero queue lag!
+  bool hadInput = false;
+  RotaryEvent evt;
+  while ((evt = pollRotarySwitch(instantSingleClick)) != EVT_NONE) {
     dispatchRotaryEvent(evt);
+    hadInput = true;
   }
 
-  // Smart Frame Pacing: redraw immediately on rotary input, or at 40 FPS (25ms)
-  // on Games/Camera/Menu and 25 FPS (40ms) on Watch Face/Status screens
+  // Run Games, Camera, and Radial Menu at full unthrottled 60+ FPS;
+  // pace static Watch Face / Status screens at 30ms
   uint32_t nowMs = millis();
-  uint32_t frameIntervalMs = (g_screen == SCREEN_GAMES || g_screen == SCREEN_CAMERA || g_screen == SCREEN_MENU) ? 25 : 40;
+  bool highFpsScreen = (
+    g_screen == SCREEN_GAMES ||
+    g_screen == SCREEN_CAMERA ||
+    g_screen == SCREEN_MENU
+  );
 
-  if (evt != EVT_NONE || (nowMs - g_lastRenderMs) >= frameIntervalMs) {
+  if (hadInput || highFpsScreen || (nowMs - g_lastRenderMs) >= 30) {
     g_lastRenderMs = nowMs;
 
     switch (g_screen) {
@@ -245,5 +264,5 @@ void loop() {
     canvas->flush();
   }
 
-  delay(2);
+  delay(1);
 }
